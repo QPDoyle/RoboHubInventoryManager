@@ -3,7 +3,10 @@
 import { useEffect, useState } from "react";
 import { createClient } from "@/lib/supabase";
 import type { Item } from "@/lib/database.types";
-import { Package, AlertTriangle } from "lucide-react";
+import { Package, AlertTriangle, ScanLine } from "lucide-react";
+import dynamic from "next/dynamic";
+
+const ScannerModal = dynamic(() => import("@/components/ScannerModal"), { ssr: false });
 
 const CATEGORIES = ["All", "Electronics", "Mechanical", "Consumables", "Tools", "Other"];
 
@@ -12,15 +15,17 @@ export default function InventoryPage() {
   const [loading, setLoading] = useState(true);
   const [search, setSearch] = useState("");
   const [category, setCategory] = useState("All");
+  const [scanning, setScanning] = useState(false);
 
   useEffect(() => {
     const supabase = createClient();
-    supabase
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    (supabase as any)
       .from("items")
       .select("*")
       .order("name")
-      .then(({ data }) => {
-        setItems((data as Item[]) ?? []);
+      .then(({ data }: { data: Item[] | null }) => {
+        setItems(data ?? []);
         setLoading(false);
       });
   }, []);
@@ -33,9 +38,17 @@ export default function InventoryPage() {
 
   return (
     <div>
+      {scanning && <ScannerModal items={items} onClose={() => setScanning(false)} />}
+
       <div className="flex items-center justify-between mb-6">
         <h1 className="text-2xl font-semibold">Inventory</h1>
-        <span className="text-sm text-gray-500">{filtered.length} items</span>
+        <button
+          onClick={() => setScanning(true)}
+          className="flex items-center gap-2 bg-blue-600 text-white px-4 py-2 rounded-lg font-medium hover:bg-blue-700 shadow-sm"
+        >
+          <ScanLine size={18} />
+          Scan Item
+        </button>
       </div>
 
       <div className="flex gap-3 mb-6">
@@ -56,6 +69,8 @@ export default function InventoryPage() {
           ))}
         </select>
       </div>
+
+      <p className="text-sm text-gray-400 mb-4">{filtered.length} items</p>
 
       {loading ? (
         <div className="text-center py-16 text-gray-400">Loading inventory...</div>
