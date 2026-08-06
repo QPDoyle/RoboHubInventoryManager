@@ -45,6 +45,8 @@ export default function ScannerModal({ items, onClose }: Props) {
 
       function onScan(decoded: string) {
         const navigate = (itemId: string) => {
+          // Null out the ref first so the cleanup effect doesn't double-stop
+          scannerRef.current = null;
           scanner.stop().catch(() => {});
           onClose();
           router.push(`/checkout?item=${itemId}`);
