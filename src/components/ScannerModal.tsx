@@ -5,7 +5,7 @@ import { useRouter } from "next/navigation";
 import { X, Camera, ScanLine } from "lucide-react";
 import type { Item } from "@/lib/database.types";
 
-type ScanState = "prompt" | "scanning";
+type ScanState = "prompt" | "scanning" | "error";
 
 interface Props {
   items: Item[];
@@ -15,91 +15,91 @@ interface Props {
 export default function ScannerModal({ items, onClose }: Props) {
   const router = useRouter();
   const [scanState, setScanState] = useState<ScanState>("prompt");
+  const [errorMsg, setErrorMsg] = useState("");
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const scannerRef = useRef<any>(null);
   const itemsRef = useRef(items);
   itemsRef.current = items;
 
-  // If camera permission already granted, skip the prompt entirely
+  // If permission already granted, skip the explanation prompt
   useEffect(() => {
     if (!navigator.permissions) return;
     navigator.permissions
       .query({ name: "camera" as PermissionName })
-      .then((result) => {
-        if (result.state === "granted") setScanState("scanning");
-      })
+      .then((r) => { if (r.state === "granted") setScanState("scanning"); })
       .catch(() => {});
   }, []);
 
-  // Start scanner when transitioning to "scanning"
   useEffect(() => {
     if (scanState !== "scanning") return;
     let mounted = true;
 
     async function startScanner() {
-      const { Html5QrcodeScanner } = await import("html5-qrcode");
+      const { Html5Qrcode } = await import("html5-qrcode");
       if (!mounted) return;
 
-      scannerRef.current = new Html5QrcodeScanner(
-        "main-qr-reader",
-        {
-          fps: 10,
-          qrbox: { width: 240, height: 240 },
-          // Prefer the back camera on phones/tablets, fall back to front on desktops
-          videoConstraints: { facingMode: { ideal: "environment" } },
-        },
-        /* verbose= */ false
-      );
+      const scanner = new Html5Qrcode("main-qr-reader");
+      scannerRef.current = scanner;
 
-      scannerRef.current.render(
-        (decoded: string) => {
-          const navigate = (itemId: string) => {
-            cleanup();
-            onClose();
-            router.push(`/checkout?item=${itemId}`);
-          };
+      const config = { fps: 10, qrbox: { width: 240, height: 240 } };
 
-          // Full URL encoded in QR (e.g. https://yourapp.com/checkout?item=abc)
-          try {
-            const url = new URL(decoded);
-            const itemId = url.searchParams.get("item");
-            if (itemId) { navigate(itemId); return; }
-          } catch {}
+      function onScan(decoded: string) {
+        const navigate = (itemId: string) => {
+          scanner.stop().catch(() => {});
+          onClose();
+          router.push(`/checkout?item=${itemId}`);
+        };
+        // Full URL encoded in QR
+        try {
+          const url = new URL(decoded);
+          const itemId = url.searchParams.get("item");
+          if (itemId) { navigate(itemId); return; }
+        } catch {}
+        // Barcode field match
+        const byBarcode = itemsRef.current.find((i) => i.barcode === decoded);
+        if (byBarcode) { navigate(byBarcode.id); return; }
+        // Raw item ID
+        const byId = itemsRef.current.find((i) => i.id === decoded);
+        if (byId) navigate(byId.id);
+      }
 
-          // Barcode field match
-          const byBarcode = itemsRef.current.find((i) => i.barcode === decoded);
-          if (byBarcode) { navigate(byBarcode.id); return; }
-
-          // Raw item ID
-          const byId = itemsRef.current.find((i) => i.id === decoded);
-          if (byId) navigate(byId.id);
-        },
-        () => {}
-      );
+      try {
+        // Try back camera first (phones/tablets)
+        await scanner.start({ facingMode: "environment" }, config, onScan, () => {});
+      } catch {
+        try {
+          // Fall back to any available camera (desktops)
+          await scanner.start({ facingMode: "user" }, config, onScan, () => {});
+        } catch (err) {
+          if (mounted) {
+            setErrorMsg("Could not open camera. Please check that camera access is allowed in your browser settings.");
+            setScanState("error");
+          }
+          console.error("Scanner failed:", err);
+        }
+      }
     }
 
     startScanner();
     return () => {
       mounted = false;
-      cleanup();
+      if (scannerRef.current) {
+        scannerRef.current.stop().catch(() => {});
+        scannerRef.current = null;
+      }
     };
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [scanState]);
 
-  function cleanup() {
+  function handleClose() {
     if (scannerRef.current) {
-      scannerRef.current.clear().catch(() => {});
+      scannerRef.current.stop().catch(() => {});
       scannerRef.current = null;
     }
-  }
-
-  function handleClose() {
-    cleanup();
     onClose();
   }
 
   return (
-    // Sheet slides up from bottom on mobile, centered modal on larger screens
     <div className="fixed inset-0 bg-black/60 z-50 flex items-end sm:items-center justify-center p-4">
       <div className="bg-white rounded-2xl w-full max-w-sm overflow-hidden shadow-xl">
         <div className="flex items-center justify-between px-5 pt-5 pb-2">
@@ -109,8 +109,7 @@ export default function ScannerModal({ items, onClose }: Props) {
           </button>
         </div>
 
-        {scanState === "prompt" ? (
-          // Pre-permission explanation — shown before the browser dialog
+        {scanState === "prompt" && (
           <div className="px-5 pb-7 pt-2 flex flex-col items-center text-center gap-5">
             <div className="w-20 h-20 bg-blue-50 rounded-full flex items-center justify-center">
               <Camera size={38} className="text-blue-500" />
@@ -130,20 +129,28 @@ export default function ScannerModal({ items, onClose }: Props) {
               <ScanLine size={18} />
               Open Camera
             </button>
-            <button
-              onClick={handleClose}
-              className="text-sm text-gray-400 hover:text-gray-600 -mt-2"
-            >
+            <button onClick={handleClose} className="text-sm text-gray-400 hover:text-gray-600 -mt-2">
               Cancel
             </button>
           </div>
-        ) : (
-          // Active scanner
+        )}
+
+        {scanState === "scanning" && (
           <div className="px-4 pb-5 pt-1">
-            <p className="text-sm text-gray-400 text-center mb-3">
-              Point at an item&apos;s QR code
-            </p>
+            <p className="text-sm text-gray-400 text-center mb-3">Point at an item&apos;s QR code</p>
             <div id="main-qr-reader" className="rounded-lg overflow-hidden" />
+          </div>
+        )}
+
+        {scanState === "error" && (
+          <div className="px-5 pb-7 pt-4 flex flex-col items-center text-center gap-4">
+            <p className="text-sm text-red-600">{errorMsg}</p>
+            <button
+              onClick={() => setScanState("scanning")}
+              className="text-sm text-blue-600 hover:underline"
+            >
+              Try again
+            </button>
           </div>
         )}
       </div>
