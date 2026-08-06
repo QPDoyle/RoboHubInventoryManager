@@ -45,40 +45,44 @@ export default function ScannerModal({ items, onClose }: Props) {
 
       function onScan(decoded: string) {
         const navigate = (itemId: string) => {
-          // Null out the ref first so the cleanup effect doesn't double-stop
           scannerRef.current = null;
           scanner.stop().catch(() => {});
           onClose();
           router.push(`/checkout?item=${itemId}`);
         };
-        // Full URL encoded in QR
         try {
           const url = new URL(decoded);
           const itemId = url.searchParams.get("item");
           if (itemId) { navigate(itemId); return; }
         } catch {}
-        // Barcode field match
         const byBarcode = itemsRef.current.find((i) => i.barcode === decoded);
         if (byBarcode) { navigate(byBarcode.id); return; }
-        // Raw item ID
         const byId = itemsRef.current.find((i) => i.id === decoded);
         if (byId) navigate(byId.id);
       }
 
       try {
-        // Try back camera first (phones/tablets)
-        await scanner.start({ facingMode: "environment" }, config, onScan, () => {});
-      } catch {
-        try {
-          // Fall back to any available camera (desktops)
-          await scanner.start({ facingMode: "user" }, config, onScan, () => {});
-        } catch (err) {
-          if (mounted) {
-            setErrorMsg("Could not open camera. Please check that camera access is allowed in your browser settings.");
-            setScanState("error");
-          }
-          console.error("Scanner failed:", err);
+        // Enumerate cameras first (no permission prompt, just enumerateDevices)
+        // then start with a specific device ID → only ONE getUserMedia call → ONE permission prompt
+        const cameras = await Html5Qrcode.getCameras();
+        if (!mounted) return;
+        if (cameras.length === 0) throw new Error("No cameras found");
+
+        // Prefer back camera by label; on iOS/Android it's usually last in the list
+        const back = cameras.find((c: { id: string; label: string }) =>
+          /back|rear|environment/i.test(c.label)
+        );
+        const chosen = back ?? cameras[cameras.length - 1];
+
+        await scanner.start(chosen.id, config, onScan, () => {});
+      } catch (err) {
+        if (mounted) {
+          setErrorMsg(
+            "Could not open camera. Please check that camera access is allowed in your browser settings."
+          );
+          setScanState("error");
         }
+        console.error("Scanner failed:", err);
       }
     }
 
@@ -147,10 +151,7 @@ export default function ScannerModal({ items, onClose }: Props) {
         {scanState === "error" && (
           <div className="px-5 pb-7 pt-4 flex flex-col items-center text-center gap-4">
             <p className="text-sm text-red-600">{errorMsg}</p>
-            <button
-              onClick={() => setScanState("scanning")}
-              className="text-sm text-blue-600 hover:underline"
-            >
+            <button onClick={() => setScanState("scanning")} className="text-sm text-blue-600 hover:underline">
               Try again
             </button>
           </div>

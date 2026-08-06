@@ -3,7 +3,7 @@
 import { useEffect, useState } from "react";
 import { createClient } from "@/lib/supabase";
 import type { Item } from "@/lib/database.types";
-import { Package, AlertTriangle, ScanLine } from "lucide-react";
+import { Package, AlertTriangle, ScanLine, Printer } from "lucide-react";
 import dynamic from "next/dynamic";
 
 const ScannerModal = dynamic(() => import("@/components/ScannerModal"), { ssr: false });
@@ -42,13 +42,23 @@ export default function InventoryPage() {
 
       <div className="flex items-center justify-between mb-6">
         <h1 className="text-2xl font-semibold">Inventory</h1>
-        <button
-          onClick={() => setScanning(true)}
-          className="flex items-center gap-2 bg-blue-600 text-white px-4 py-2 rounded-lg font-medium hover:bg-blue-700 shadow-sm"
-        >
-          <ScanLine size={18} />
-          Scan Item
-        </button>
+        <div className="flex items-center gap-2">
+          <a
+            href="/items/print-all"
+            target="_blank"
+            className="flex items-center gap-2 border border-gray-300 text-gray-700 px-4 py-2 rounded-lg font-medium hover:bg-gray-50"
+          >
+            <Printer size={16} />
+            Print QR Codes
+          </a>
+          <button
+            onClick={() => setScanning(true)}
+            className="flex items-center gap-2 bg-blue-600 text-white px-4 py-2 rounded-lg font-medium hover:bg-blue-700 shadow-sm"
+          >
+            <ScanLine size={18} />
+            Scan Item
+          </button>
+        </div>
       </div>
 
       <div className="flex gap-3 mb-6">
