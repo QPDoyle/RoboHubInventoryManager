@@ -4,7 +4,7 @@ import { useEffect, useRef, useState, Suspense } from "react";
 import { useSearchParams } from "next/navigation";
 import { createClient } from "@/lib/supabase";
 import type { Item, Checkout } from "@/lib/database.types";
-import { ScanLine, CheckCircle, RotateCcw, ArrowLeft } from "lucide-react";
+import { ScanLine, CheckCircle, RotateCcw, ArrowLeft, Home } from "lucide-react";
 
 type Mode = "checkout" | "return";
 
@@ -179,7 +179,7 @@ function CheckoutForm() {
     setSaving(false);
   }
 
-  function reset() {
+  function reset(nextMode: Mode = "checkout") {
     setSelectedItem(scannedItemId ? selectedItem : null);
     setName("");
     setQuantity(1);
@@ -187,7 +187,7 @@ function CheckoutForm() {
     setDueDate("");
     setNotes("");
     setSuccess(false);
-    setMode("checkout");
+    setMode(nextMode);
     // Refresh available counts
     const supabase = createClient();
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -206,21 +206,41 @@ function CheckoutForm() {
   }
 
   if (success) {
+    const isConsumable = selectedItem?.category === "Consumables";
     return (
       <div className="max-w-md mx-auto text-center py-16">
         <CheckCircle className="mx-auto mb-4 text-green-500" size={48} />
         <h2 className="text-xl font-semibold mb-2">
           {mode === "checkout" ? "Checked out!" : "Returned!"}
         </h2>
-        <p className="text-gray-500 mb-6">
+        <p className="text-gray-500 mb-8">
           {selectedItem?.name} · qty {mode === "checkout" ? quantity : returnQuantity} · {name}
         </p>
-        <button
-          onClick={reset}
-          className="bg-blue-600 text-white px-6 py-2 rounded-md text-sm font-medium hover:bg-blue-700"
-        >
-          Done / Another
-        </button>
+        <div className="flex flex-col gap-3">
+          {mode === "checkout" && !isConsumable && (
+            <button
+              onClick={() => reset("return")}
+              className="flex items-center justify-center gap-2 w-full border border-gray-300 text-gray-700 px-6 py-3 rounded-lg text-sm font-medium hover:bg-gray-50"
+            >
+              <RotateCcw size={15} />
+              Return This Item
+            </button>
+          )}
+          <a
+            href="/"
+            className="flex items-center justify-center gap-2 w-full border border-gray-300 text-gray-700 px-6 py-3 rounded-lg text-sm font-medium hover:bg-gray-50"
+          >
+            <Home size={15} />
+            Go Home
+          </a>
+          <button
+            onClick={() => reset("checkout")}
+            className="flex items-center justify-center gap-2 w-full bg-blue-600 text-white px-6 py-3 rounded-lg text-sm font-medium hover:bg-blue-700"
+          >
+            <ScanLine size={15} />
+            Check Out Again
+          </button>
+        </div>
       </div>
     );
   }
