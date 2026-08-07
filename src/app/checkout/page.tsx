@@ -87,30 +87,58 @@ function CheckoutForm() {
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     const db = createClient() as any;
 
+    const isConsumable = selectedItem.category === "Consumables";
+
     if (mode === "checkout") {
       if (quantity > selectedItem.available_quantity) {
         alert(`Only ${selectedItem.available_quantity} available — can't check out ${quantity}.`);
         setSaving(false);
         return;
       }
-      const { error } = await db.from("checkouts").insert({
-        item_id: selectedItem.id,
-        checked_out_by: name,
-        quantity,
-        due_date: dueDate || null,
-        notes: notes || null,
-        returned_at: null,
-      });
-      if (error) {
-        alert("Error: " + (error as { message: string }).message);
+
+      if (isConsumable) {
+        // Consumables are used up — reduce total stock permanently, record for history
+        const { error } = await db.from("checkouts").insert({
+          item_id: selectedItem.id,
+          checked_out_by: name,
+          quantity,
+          notes: notes || null,
+          returned_at: new Date().toISOString(), // immediately consumed
+        });
+        if (error) {
+          alert("Error: " + (error as { message: string }).message);
+          setSaving(false);
+          return;
+        }
+        await db.from("items").update({
+          total_quantity: selectedItem.total_quantity - quantity,
+          available_quantity: selectedItem.available_quantity - quantity,
+        }).eq("id", selectedItem.id);
+      } else {
+        const { error } = await db.from("checkouts").insert({
+          item_id: selectedItem.id,
+          checked_out_by: name,
+          quantity,
+          due_date: dueDate || null,
+          notes: notes || null,
+          returned_at: null,
+        });
+        if (error) {
+          alert("Error: " + (error as { message: string }).message);
+          setSaving(false);
+          return;
+        }
+        await db
+          .from("items")
+          .update({ available_quantity: selectedItem.available_quantity - quantity })
+          .eq("id", selectedItem.id);
+      }
+    } else {
+      if (isConsumable) {
+        alert(`${selectedItem.name} is a consumable and cannot be returned — it was removed from stock when checked out.`);
         setSaving(false);
         return;
       }
-      await db
-        .from("items")
-        .update({ available_quantity: selectedItem.available_quantity - quantity })
-        .eq("id", selectedItem.id);
-    } else {
       const { data: active } = await db
         .from("checkouts")
         .select("*")
@@ -303,8 +331,16 @@ function CheckoutForm() {
             </>
           )}
 
+          {/* Consumable warning in return mode */}
+          {mode === "return" && selectedItem.category === "Consumables" && (
+            <div className="bg-amber-50 border border-amber-200 rounded-lg px-4 py-3 text-sm text-amber-800">
+              <strong>{selectedItem.name}</strong> is a consumable — it cannot be returned.
+              Consumables are removed from total stock when checked out.
+            </div>
+          )}
+
           {/* Return quantity */}
-          {mode === "return" && (
+          {mode === "return" && selectedItem.category !== "Consumables" && (
             <div>
               <label className="block text-sm font-medium text-gray-700 mb-1">
                 How many are you returning?
@@ -325,7 +361,8 @@ function CheckoutForm() {
             disabled={
               saving ||
               (mode === "checkout" && selectedItem.available_quantity < quantity) ||
-              (mode === "checkout" && isOut)
+              (mode === "checkout" && isOut) ||
+              (mode === "return" && selectedItem.category === "Consumables")
             }
             className="w-full bg-blue-600 text-white rounded-lg py-3 text-sm font-semibold hover:bg-blue-700 disabled:opacity-50"
           >
@@ -448,7 +485,14 @@ function CheckoutForm() {
           </>
         )}
 
-        {mode === "return" && (
+        {mode === "return" && selectedItem?.category === "Consumables" && (
+          <div className="bg-amber-50 border border-amber-200 rounded-lg px-4 py-3 text-sm text-amber-800">
+            <strong>{selectedItem.name}</strong> is a consumable — it cannot be returned.
+            Consumables are removed from total stock when checked out.
+          </div>
+        )}
+
+        {mode === "return" && selectedItem?.category !== "Consumables" && (
           <div>
             <label className="block text-sm font-medium text-gray-700 mb-1">
               How many are you returning?
@@ -468,7 +512,8 @@ function CheckoutForm() {
           type="submit"
           disabled={
             saving ||
-            (mode === "checkout" && !!selectedItem && selectedItem.available_quantity < quantity)
+            (mode === "checkout" && !!selectedItem && selectedItem.available_quantity < quantity) ||
+            (mode === "return" && selectedItem?.category === "Consumables")
           }
           className="w-full bg-blue-600 text-white rounded-md px-4 py-2 text-sm font-medium hover:bg-blue-700 disabled:opacity-50"
         >

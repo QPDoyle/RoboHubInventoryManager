@@ -4,8 +4,10 @@ import { useEffect, useState } from "react";
 import { useParams, useRouter } from "next/navigation";
 import { createClient } from "@/lib/supabase";
 import type { Item, Checkout } from "@/lib/database.types";
-import { ArrowLeft, CheckCircle, Clock, Printer, QrCode } from "lucide-react";
+import { ArrowLeft, CheckCircle, Clock, Printer, QrCode, Trash2 } from "lucide-react";
 import { QRCodeSVG } from "qrcode.react";
+
+type DeleteMode = "quantity" | "all";
 
 export default function ItemDetailPage() {
   const { id } = useParams<{ id: string }>();
@@ -14,6 +16,13 @@ export default function ItemDetailPage() {
   const [checkouts, setCheckouts] = useState<Checkout[]>([]);
   const [loading, setLoading] = useState(true);
   const [origin, setOrigin] = useState("");
+
+  // Delete modal state
+  const [deleteOpen, setDeleteOpen] = useState(false);
+  const [deleteMode, setDeleteMode] = useState<DeleteMode>("quantity");
+  const [deleteQty, setDeleteQty] = useState(1);
+  const [deleteConfirm, setDeleteConfirm] = useState("");
+  const [deleting, setDeleting] = useState(false);
 
   useEffect(() => {
     setOrigin(window.location.origin);
@@ -35,6 +44,42 @@ export default function ItemDetailPage() {
     });
   }, [id]);
 
+  async function handleDelete(e: React.FormEvent) {
+    e.preventDefault();
+    if (!item) return;
+
+    if (deleteMode === "all" && deleteConfirm !== "DELETE") {
+      alert('Type DELETE (all caps) to confirm.');
+      return;
+    }
+
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const db = createClient() as any;
+    setDeleting(true);
+
+    if (deleteMode === "quantity") {
+      if (deleteQty > item.total_quantity) {
+        alert(`Can't remove ${deleteQty} — only ${item.total_quantity} exist in total.`);
+        setDeleting(false);
+        return;
+      }
+      await db.from("items").update({
+        total_quantity: item.total_quantity - deleteQty,
+        available_quantity: Math.max(0, item.available_quantity - deleteQty),
+      }).eq("id", item.id);
+
+      const { data } = await db.from("items").select("*").eq("id", item.id).single();
+      setItem(data as Item);
+      setDeleteOpen(false);
+      setDeleteQty(1);
+    } else {
+      await db.from("items").delete().eq("id", item.id);
+      router.push("/");
+    }
+
+    setDeleting(false);
+  }
+
   if (loading) return <div className="text-gray-400 py-16 text-center">Loading...</div>;
   if (!item) return <div className="text-gray-400 py-16 text-center">Item not found.</div>;
 
@@ -44,6 +89,96 @@ export default function ItemDetailPage() {
 
   return (
     <div>
+      {/* Delete confirmation modal */}
+      {deleteOpen && (
+        <div className="fixed inset-0 bg-black/50 z-50 flex items-center justify-center p-4">
+          <div className="bg-white rounded-xl w-full max-w-md p-6 shadow-xl">
+            <h2 className="text-lg font-semibold mb-1">Delete / Remove Stock</h2>
+            <p className="text-sm text-gray-500 mb-5">
+              Choose whether to remove a quantity from stock or delete the item entirely.
+            </p>
+
+            <form onSubmit={handleDelete} className="space-y-4">
+              {/* Mode toggle */}
+              <div className="flex gap-2">
+                {(["quantity", "all"] as DeleteMode[]).map((m) => (
+                  <button
+                    key={m}
+                    type="button"
+                    onClick={() => { setDeleteMode(m); setDeleteConfirm(""); }}
+                    className={`flex-1 py-2 rounded-lg text-sm font-medium transition-colors ${
+                      deleteMode === m
+                        ? m === "all" ? "bg-red-600 text-white" : "bg-gray-800 text-white"
+                        : "bg-gray-100 text-gray-600 hover:bg-gray-200"
+                    }`}
+                  >
+                    {m === "quantity" ? "Remove quantity" : "Delete entirely"}
+                  </button>
+                ))}
+              </div>
+
+              {deleteMode === "quantity" ? (
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-1">
+                    How many to remove from total stock?
+                  </label>
+                  <input
+                    required
+                    type="number"
+                    min={1}
+                    max={item.total_quantity}
+                    value={deleteQty}
+                    onChange={(e) => setDeleteQty(Number(e.target.value))}
+                    className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-gray-400"
+                  />
+                  {deleteQty > item.available_quantity && (
+                    <p className="text-xs text-yellow-700 bg-yellow-50 border border-yellow-200 rounded mt-2 px-3 py-2">
+                      {deleteQty - item.available_quantity} of these are currently checked out. Their available count will floor at 0.
+                    </p>
+                  )}
+                </div>
+              ) : (
+                <div>
+                  {activeCheckouts.length > 0 && (
+                    <p className="text-xs text-yellow-700 bg-yellow-50 border border-yellow-200 rounded px-3 py-2 mb-3">
+                      {activeCheckouts.length} active checkout{activeCheckouts.length > 1 ? "s" : ""} will also be deleted.
+                    </p>
+                  )}
+                  <label className="block text-sm font-medium text-gray-700 mb-1">
+                    Type <strong>DELETE</strong> to confirm
+                  </label>
+                  <input
+                    required
+                    value={deleteConfirm}
+                    onChange={(e) => setDeleteConfirm(e.target.value)}
+                    className="w-full border border-red-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-red-400"
+                    placeholder="DELETE"
+                    autoComplete="off"
+                  />
+                </div>
+              )}
+
+              <div className="flex gap-2 pt-1">
+                <button
+                  type="button"
+                  onClick={() => { setDeleteOpen(false); setDeleteConfirm(""); setDeleteQty(1); }}
+                  className="flex-1 border border-gray-300 rounded-lg py-2 text-sm font-medium hover:bg-gray-50"
+                >
+                  Cancel
+                </button>
+                <button
+                  type="submit"
+                  disabled={deleting || (deleteMode === "all" && deleteConfirm !== "DELETE")}
+                  className="flex-1 bg-red-600 text-white rounded-lg py-2 text-sm font-medium hover:bg-red-700 disabled:opacity-40"
+                >
+                  {deleting ? "Deleting..." : deleteMode === "quantity" ? "Remove Stock" : "Delete Item"}
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
+
       <button
         onClick={() => router.back()}
         className="flex items-center gap-1.5 text-sm text-gray-500 hover:text-gray-800 mb-6"
@@ -84,11 +219,7 @@ export default function ItemDetailPage() {
             QR Code
           </div>
           {origin && (
-            <QRCodeSVG
-              value={checkoutUrl}
-              size={140}
-              level="M"
-            />
+            <QRCodeSVG value={checkoutUrl} size={140} level="M" />
           )}
           <p className="text-xs text-gray-400 text-center">Scan to check out or return</p>
           <a
@@ -120,7 +251,7 @@ export default function ItemDetailPage() {
         </div>
       )}
 
-      <div>
+      <div className="mb-8">
         <h2 className="text-sm font-semibold text-gray-700 mb-3 flex items-center gap-1.5">
           <CheckCircle size={14} className="text-green-500" /> Checkout History
         </h2>
@@ -139,6 +270,20 @@ export default function ItemDetailPage() {
             ))}
           </div>
         )}
+      </div>
+
+      {/* Danger zone */}
+      <div className="border border-red-200 rounded-lg p-4 flex items-center justify-between">
+        <div>
+          <p className="text-sm font-medium text-red-700">Delete or remove stock</p>
+          <p className="text-xs text-red-400 mt-0.5">Remove a quantity or delete this item entirely</p>
+        </div>
+        <button
+          onClick={() => setDeleteOpen(true)}
+          className="flex items-center gap-1.5 bg-red-600 text-white text-sm px-3 py-2 rounded-lg hover:bg-red-700"
+        >
+          <Trash2 size={14} /> Delete
+        </button>
       </div>
     </div>
   );
