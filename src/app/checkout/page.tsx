@@ -88,6 +88,11 @@ function CheckoutForm() {
     const db = createClient() as any;
 
     if (mode === "checkout") {
+      if (quantity > selectedItem.available_quantity) {
+        alert(`Only ${selectedItem.available_quantity} available — can't check out ${quantity}.`);
+        setSaving(false);
+        return;
+      }
       const { error } = await db.from("checkouts").insert({
         item_id: selectedItem.id,
         checked_out_by: name,
@@ -121,9 +126,14 @@ function CheckoutForm() {
         return;
       }
       const checkout = activeCheckouts[0];
-      const returning = Math.min(returnQuantity, checkout.quantity);
-      const remaining = checkout.quantity - returning;
 
+      if (returnQuantity > checkout.quantity) {
+        alert(`${name} only has ${checkout.quantity} checked out — can't return ${returnQuantity}.`);
+        setSaving(false);
+        return;
+      }
+
+      const remaining = checkout.quantity - returnQuantity;
       if (remaining <= 0) {
         // Full return — mark the record as returned
         await db.from("checkouts").update({ returned_at: new Date().toISOString() }).eq("id", checkout.id);
@@ -133,7 +143,7 @@ function CheckoutForm() {
       }
       await db
         .from("items")
-        .update({ available_quantity: selectedItem.available_quantity + returning })
+        .update({ available_quantity: selectedItem.available_quantity + returnQuantity })
         .eq("id", selectedItem.id);
     }
 
