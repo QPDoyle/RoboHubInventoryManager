@@ -17,6 +17,7 @@ function CheckoutForm() {
   const [mode, setMode] = useState<Mode>("checkout");
   const [name, setName] = useState("");
   const [quantity, setQuantity] = useState(1);
+  const [returnQuantity, setReturnQuantity] = useState(1);
   const [dueDate, setDueDate] = useState("");
   const [notes, setNotes] = useState("");
   const [saving, setSaving] = useState(false);
@@ -120,10 +121,19 @@ function CheckoutForm() {
         return;
       }
       const checkout = activeCheckouts[0];
-      await db.from("checkouts").update({ returned_at: new Date().toISOString() }).eq("id", checkout.id);
+      const returning = Math.min(returnQuantity, checkout.quantity);
+      const remaining = checkout.quantity - returning;
+
+      if (remaining <= 0) {
+        // Full return — mark the record as returned
+        await db.from("checkouts").update({ returned_at: new Date().toISOString() }).eq("id", checkout.id);
+      } else {
+        // Partial return — reduce the checked-out quantity, leave record open
+        await db.from("checkouts").update({ quantity: remaining }).eq("id", checkout.id);
+      }
       await db
         .from("items")
-        .update({ available_quantity: selectedItem.available_quantity + checkout.quantity })
+        .update({ available_quantity: selectedItem.available_quantity + returning })
         .eq("id", selectedItem.id);
     }
 
@@ -135,6 +145,7 @@ function CheckoutForm() {
     setSelectedItem(scannedItemId ? selectedItem : null);
     setName("");
     setQuantity(1);
+    setReturnQuantity(1);
     setDueDate("");
     setNotes("");
     setSuccess(false);
@@ -164,7 +175,7 @@ function CheckoutForm() {
           {mode === "checkout" ? "Checked out!" : "Returned!"}
         </h2>
         <p className="text-gray-500 mb-6">
-          {selectedItem?.name} · qty {quantity} · {name}
+          {selectedItem?.name} · qty {mode === "checkout" ? quantity : returnQuantity} · {name}
         </p>
         <button
           onClick={reset}
@@ -239,7 +250,7 @@ function CheckoutForm() {
             />
           </div>
 
-          {/* Checkout-only fields */}
+          {/* Checkout fields */}
           {mode === "checkout" && (
             <>
               <div className="grid grid-cols-2 gap-3">
@@ -280,6 +291,23 @@ function CheckoutForm() {
                 </p>
               )}
             </>
+          )}
+
+          {/* Return quantity */}
+          {mode === "return" && (
+            <div>
+              <label className="block text-sm font-medium text-gray-700 mb-1">
+                How many are you returning?
+              </label>
+              <input
+                required
+                type="number"
+                min={1}
+                value={returnQuantity}
+                onChange={(e) => setReturnQuantity(Number(e.target.value))}
+                className="w-full border border-gray-300 rounded-lg px-3 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
+              />
+            </div>
           )}
 
           <button
@@ -402,13 +430,28 @@ function CheckoutForm() {
                 placeholder="Optional"
               />
             </div>
+            {selectedItem && selectedItem.available_quantity < quantity && (
+              <p className="text-sm text-red-600">
+                Only {selectedItem.available_quantity} available — reduce quantity.
+              </p>
+            )}
           </>
         )}
 
-        {selectedItem && mode === "checkout" && selectedItem.available_quantity < quantity && (
-          <p className="text-sm text-red-600">
-            Only {selectedItem.available_quantity} available — reduce quantity.
-          </p>
+        {mode === "return" && (
+          <div>
+            <label className="block text-sm font-medium text-gray-700 mb-1">
+              How many are you returning?
+            </label>
+            <input
+              required
+              type="number"
+              min={1}
+              value={returnQuantity}
+              onChange={(e) => setReturnQuantity(Number(e.target.value))}
+              className="w-full border border-gray-300 rounded-md px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
+            />
+          </div>
         )}
 
         <button
